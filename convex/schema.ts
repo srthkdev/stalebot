@@ -1,0 +1,98 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+export default defineSchema({
+  // User profiles and authentication data
+  users: defineTable({
+    githubId: v.string(),
+    email: v.string(),
+    accessToken: v.string(), // encrypted
+    refreshToken: v.string(), // encrypted
+    repositories: v.array(v.id("repositories")),
+    notificationPreferences: v.object({
+      frequency: v.union(v.literal("immediate"), v.literal("daily"), v.literal("weekly")),
+      quietHours: v.optional(v.object({
+        start: v.number(), // hour 0-23
+        end: v.number(), // hour 0-23
+      })),
+      isPaused: v.boolean(),
+    }),
+    createdAt: v.number(),
+    lastActive: v.number(),
+  }).index("by_github_id", ["githubId"]),
+
+  // Monitored repositories and their configurations
+  repositories: defineTable({
+    userId: v.id("users"),
+    githubId: v.number(),
+    name: v.string(),
+    fullName: v.string(), // owner/repo
+    isActive: v.boolean(),
+    rules: v.array(v.id("rules")),
+    lastChecked: v.number(),
+    lastIssueCount: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_github_id", ["githubId"])
+    .index("by_active", ["isActive"]),
+
+  // Stale detection rules with flexible criteria
+  rules: defineTable({
+    userId: v.id("users"),
+    repositoryId: v.id("repositories"),
+    name: v.string(),
+    inactivityDays: v.number(),
+    labels: v.array(v.string()), // empty array means all labels
+    issueStates: v.array(v.union(v.literal("open"), v.literal("closed"))),
+    assigneeCondition: v.union(
+      v.literal("any"),
+      v.literal("assigned"),
+      v.literal("unassigned"),
+      v.array(v.string()) // specific users
+    ),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_repository", ["repositoryId"]),
+
+  // Cache issue data and track staleness status
+  issues: defineTable({
+    repositoryId: v.id("repositories"),
+    githubIssueId: v.number(),
+    title: v.string(),
+    url: v.string(),
+    state: v.union(v.literal("open"), v.literal("closed")),
+    labels: v.array(v.string()),
+    assignee: v.optional(v.string()),
+    lastActivity: v.number(),
+    isStale: v.boolean(),
+    lastNotified: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_repository", ["repositoryId"])
+    .index("by_stale_status", ["repositoryId", "isStale"])
+    .index("by_last_activity", ["lastActivity"]),
+
+  // Record email notifications and delivery status
+  notifications: defineTable({
+    userId: v.id("users"),
+    repositoryId: v.id("repositories"),
+    issueIds: v.array(v.id("issues")),
+    emailId: v.string(), // from Resend
+    status: v.union(
+      v.literal("pending"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("bounced"),
+      v.literal("failed")
+    ),
+    sentAt: v.number(),
+    deliveredAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_status", ["status"]),
+});
