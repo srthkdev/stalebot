@@ -1,5 +1,5 @@
 // Core type definitions for StaleBot
-import { Id } from "../convex/_generated/dataModel";
+import { Id } from "../../convex/_generated/dataModel";
 
 export interface UserProfile {
   _id: Id<"users">;

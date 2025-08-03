@@ -5,7 +5,7 @@ import {
   validateLabels,
   validateIssueStates,
   validateAssigneeCondition
-} from "../types/validators";
+} from "../../src/types/validators";
 
 describe("Rule Configuration System", () => {
 

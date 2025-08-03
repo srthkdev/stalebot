@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
-import { GitHubService } from "../components/github";
+import { GitHubService } from "../src/lib/github";
 import { getCurrentUser } from "./lib/auth_helpers";
 
 // Repository selection and configuration functions

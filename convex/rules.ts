@@ -5,7 +5,7 @@ import {
   createRuleFormValidator, 
   updateRuleFormValidator,
   validateInactivityDays 
-} from "../types/validators";
+} from "../src/types/validators";
 
 // Create a new stale detection rule
 export const createRule = mutation({
