@@ -4,6 +4,19 @@ import { Id } from "../_generated/dataModel";
 import { decryptToken } from "./encryption";
 
 /**
+ * Get current authenticated user (returns null if not authenticated)
+ */
+export async function getCurrentUser(ctx: QueryCtx | MutationCtx) {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+        return null;
+    }
+
+    const user = await ctx.db.get(userId);
+    return user;
+}
+
+/**
  * Get authenticated user with error handling
  */
 export async function getAuthenticatedUser(ctx: QueryCtx | MutationCtx) {

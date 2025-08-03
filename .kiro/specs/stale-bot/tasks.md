@@ -46,14 +46,14 @@
     - Implement incremental updates using GitHub's since parameter
     - _Requirements: 1.2, 3.1, 3.2_
 
-- [ ] 5. Create repository management system
-  - [ ] 5.1 Implement repository selection and configuration
+- [x] 5. Create repository management system
+  - [x] 5.1 Implement repository selection and configuration
     - Create functions to add/remove repositories from monitoring
     - Build repository settings management with validation
     - Add functions to check repository access permissions
     - _Requirements: 1.2, 1.3, 1.4, 1.5_
 
-  - [ ] 5.2 Build repository status tracking
+  - [x] 5.2 Build repository status tracking
     - Implement functions to track last check times and issue counts
     - Create repository health monitoring and error tracking
     - Add manual refresh functionality for individual repositories
