@@ -174,3 +174,46 @@ export const validateGitHubRepoName = (fullName: string): boolean => {
   const repoNameRegex = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
   return repoNameRegex.test(fullName);
 };
+// Rule-specific validation functions
+export const validateRuleName = (name: string): boolean => {
+  return name.trim().length > 0 && name.trim().length <= 100;
+};
+
+export const validateLabels = (labels: string[]): boolean => {
+  return labels.every(label => typeof label === "string" && label.trim().length > 0);
+};
+
+export const validateIssueStates = (states: string[]): boolean => {
+  const validStates = ["open", "closed"];
+  return states.length > 0 && states.every(state => validStates.includes(state));
+};
+
+export const validateAssigneeCondition = (condition: any): boolean => {
+  const validConditions = ["any", "assigned", "unassigned"];
+  
+  if (validConditions.includes(condition)) {
+    return true;
+  }
+  
+  if (Array.isArray(condition)) {
+    return condition.every(user => typeof user === "string" && user.trim().length > 0);
+  }
+  
+  return false;
+};
+
+// Rule testing validation
+export const testRuleConfigValidator = v.object({
+  repositoryId: v.id("repositories"),
+  name: v.string(),
+  inactivityDays: v.number(),
+  labels: v.array(v.string()),
+  issueStates: v.array(v.union(v.literal("open"), v.literal("closed"))),
+  assigneeCondition: assigneeConditionValidator,
+});
+
+// Rule status toggle validation
+export const toggleRuleStatusValidator = v.object({
+  ruleId: v.id("rules"),
+  isActive: v.boolean(),
+});

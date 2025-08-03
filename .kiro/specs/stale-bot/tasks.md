@@ -59,14 +59,14 @@
     - Add manual refresh functionality for individual repositories
     - _Requirements: 3.7, 5.6, 6.6_
 
-- [ ] 6. Develop stale issue detection rule engine
-  - [ ] 6.1 Create rule configuration system
+- [x] 6. Develop stale issue detection rule engine
+  - [x] 6.1 Create rule configuration system
     - Implement CRUD operations for stale detection rules
     - Add rule validation logic for all configuration options
     - Create rule testing functionality to preview matches
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
 
-  - [ ] 6.2 Build stale issue identification logic
+  - [x] 6.2 Build stale issue identification logic
     - Implement rule evaluation engine that processes issues against rules
     - Create functions to calculate issue inactivity periods
     - Add logic to handle multiple rules per repository
