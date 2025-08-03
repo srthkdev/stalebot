@@ -20,14 +20,14 @@
     - Add validation schemas using Convex validators
     - _Requirements: 1.3, 2.5, 6.7_
 
-- [ ] 3. Implement GitHub OAuth authentication system
-  - [ ] 3.1 Set up GitHub OAuth configuration
+- [x] 3. Implement GitHub OAuth authentication system
+  - [x] 3.1 Set up GitHub OAuth configuration
     - Configure GitHub OAuth app credentials in Convex Auth
     - Create authentication functions for sign-in and sign-out
     - Implement token refresh logic for expired access tokens
     - _Requirements: 1.1, 1.5, 6.5_
 
-  - [ ] 3.2 Create user profile management functions
+  - [x] 3.2 Create user profile management functions
     - Implement user creation and profile updates
     - Add functions to store and encrypt GitHub access tokens
     - Create user session management and authentication checks

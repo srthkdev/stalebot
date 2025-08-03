@@ -20,6 +20,8 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@auth/core": "^0.40.0",
+    "@convex-dev/auth": "^0.0.88",
     "convex": "^1.25.4"
   },
   "devDependencies": {

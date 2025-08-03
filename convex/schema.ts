@@ -1,21 +1,27 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
+  // Auth tables for Convex Auth
+  ...authTables,
   // User profiles and authentication data
   users: defineTable({
     githubId: v.string(),
     email: v.string(),
+    name: v.optional(v.string()),
+    avatarUrl: v.optional(v.string()),
     accessToken: v.string(), // encrypted
     refreshToken: v.string(), // encrypted
     repositories: v.array(v.id("repositories")),
     notificationPreferences: v.object({
-      frequency: v.union(v.literal("immediate"), v.literal("daily"), v.literal("weekly")),
-      quietHours: v.optional(v.object({
+      emailFrequency: v.union(v.literal("immediate"), v.literal("daily"), v.literal("weekly")),
+      quietHours: v.object({
         start: v.number(), // hour 0-23
         end: v.number(), // hour 0-23
-      })),
-      isPaused: v.boolean(),
+      }),
+      emailTemplate: v.string(),
+      pauseNotifications: v.boolean(),
     }),
     createdAt: v.number(),
     lastActive: v.number(),

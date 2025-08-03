@@ -5,6 +5,8 @@ export interface UserProfile {
   _id: Id<"users">;
   githubId: string;
   email: string;
+  name?: string;
+  avatarUrl?: string;
   accessToken: string; // encrypted
   refreshToken: string; // encrypted
   repositories: Id<"repositories">[];
@@ -14,12 +16,13 @@ export interface UserProfile {
 }
 
 export interface NotificationPreferences {
-  frequency: "immediate" | "daily" | "weekly";
-  quietHours?: {
+  emailFrequency: "immediate" | "daily" | "weekly";
+  quietHours: {
     start: number; // hour 0-23
     end: number; // hour 0-23
   };
-  isPaused: boolean;
+  emailTemplate: string;
+  pauseNotifications: boolean;
 }
 
 export interface Repository {
@@ -130,12 +133,13 @@ export interface UpdateRuleFormData extends Partial<Omit<CreateRuleFormData, "re
 }
 
 export interface UpdateNotificationPreferencesFormData {
-  frequency?: "immediate" | "daily" | "weekly";
+  emailFrequency?: "immediate" | "daily" | "weekly";
   quietHours?: {
     start: number;
     end: number;
   };
-  isPaused?: boolean;
+  emailTemplate?: string;
+  pauseNotifications?: boolean;
 }
 
 export interface AddRepositoryFormData {
