@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { GitHubService } from "../src/lib/github";
 import { getCurrentUser } from "./lib/auth_helpers";
 
@@ -601,11 +602,10 @@ export const manualRefreshRepository = mutation({
       }
 
       // Trigger manual processing by scheduling internal function
-      // TODO: Implement processor:checkRepository function
-      // await ctx.scheduler.runAfter(0, "processor:checkRepository", {
-      //   repositoryId: args.repositoryId,
-      //   isManualRefresh: true,
-      // });
+      const scheduledId = await ctx.scheduler.runAfter(0, internal.processor.processRepository, {
+        repositoryId: args.repositoryId,
+        isManualRefresh: true,
+      });
 
       return {
         success: true,

@@ -73,13 +73,13 @@
     - _Requirements: 3.2, 3.3, 7.4_
 
 - [ ] 7. Implement scheduled issue processing system
-  - [ ] 7.1 Create Convex cron job for automated checking
+  - [x] 7.1 Create Convex cron job for automated checking
     - Set up cron job configuration for periodic repository checks
     - Implement main processing function that iterates through all active repositories
     - Add error handling and logging for scheduled operations
     - _Requirements: 3.1, 3.4, 3.5, 3.6, 3.7_
 
-  - [ ] 7.2 Build batch processing logic for repositories
+  - [x] 7.2 Build batch processing logic for repositories
     - Create functions to process repositories in batches to avoid timeouts
     - Implement proper error isolation so one repository failure doesn't stop others
     - Add progress tracking and status updates for long-running operations

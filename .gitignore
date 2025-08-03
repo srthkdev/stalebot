@@ -16,6 +16,7 @@ _generated/
 
 # IDE
 .vscode/
+.kiro/
 .idea/
 *.swp
 *.swo
@@ -33,4 +34,4 @@ build/
 
 # TypeScript
 *.tsbuildinfo
-.kiro
+
