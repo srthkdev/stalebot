@@ -211,7 +211,7 @@ export interface ApiError {
   details?: Record<string, any>;
 }
 
-export interface GitHubApiError extends ApiError {
+export interface GitHubApiErrorData extends ApiError {
   status: number;
   rateLimitRemaining?: number;
   rateLimitReset?: number;
