@@ -30,7 +30,9 @@ export default defineSchema({
     }),
     createdAt: v.number(),
     lastActive: v.number(),
-  }).index("by_github_id", ["githubId"]),
+  })
+    .index("by_github_id", ["githubId"])
+    .index("email", ["email"]),
 
   // Monitored repositories and their configurations
   repositories: defineTable({
