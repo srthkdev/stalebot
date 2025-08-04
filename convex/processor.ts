@@ -58,7 +58,7 @@ export const processAllRepositories = internalMutation({
 
         // Process batch with error isolation
         const batchResults = await Promise.allSettled(
-          batch.map(repo => 
+          batch.map(repo =>
             processRepositoryInternal(ctx, {
               repositoryId: repo._id,
               isScheduledCheck: true,
@@ -97,7 +97,7 @@ export const processAllRepositories = internalMutation({
     } catch (error) {
       const duration = Date.now() - startTime;
       console.error("Critical error in processAllRepositories:", error);
-      
+
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
@@ -132,209 +132,230 @@ async function processRepositoryInternal(ctx: any, args: {
   isScheduledCheck?: boolean;
   isManualRefresh?: boolean;
 }) {
-    const startTime = Date.now();
-    const checkType = args.isManualRefresh ? "manual" : (args.isScheduledCheck ? "scheduled" : "unknown");
-    
-    console.log(`Starting ${checkType} check for repository ${args.repositoryId}`);
+  const startTime = Date.now();
+  const checkType = args.isManualRefresh ? "manual" : (args.isScheduledCheck ? "scheduled" : "unknown");
 
-    try {
-      // Get repository and user information
-      const repository = await ctx.db.get(args.repositoryId);
-      if (!repository) {
-        throw new Error(`Repository ${args.repositoryId} not found`);
-      }
+  console.log(`Starting ${checkType} check for repository ${args.repositoryId}`);
 
-      if (!repository.isActive) {
-        console.log(`Skipping inactive repository: ${repository.fullName}`);
-        return {
-          success: true,
-          skipped: true,
-          reason: "Repository is inactive",
-          repositoryName: repository.fullName,
-        };
-      }
+  try {
+    // Get repository and user information
+    const repository = await ctx.db.get(args.repositoryId);
+    if (!repository) {
+      throw new Error(`Repository ${args.repositoryId} not found`);
+    }
 
-      const user = await ctx.db.get(repository.userId);
-      if (!user) {
-        throw new Error(`User ${repository.userId} not found for repository ${repository.fullName}`);
-      }
-
-      // Get active rules for this repository
-      const rules = await ctx.db
-        .query("rules")
-        .withIndex("by_repository", (q: any) => q.eq("repositoryId", args.repositoryId))
-        .filter((q: any) => q.eq(q.field("isActive"), true))
-        .collect();
-
-      if (rules.length === 0) {
-        console.log(`No active rules found for repository: ${repository.fullName}`);
-        await ctx.db.patch(args.repositoryId, {
-          lastChecked: Date.now(),
-        });
-        return {
-          success: true,
-          skipped: true,
-          reason: "No active rules",
-          repositoryName: repository.fullName,
-        };
-      }
-
-      // Initialize GitHub service
-      const githubService = new GitHubService();
-      const [owner, repo] = repository.fullName.split("/");
-
-      // Validate repository access
-      const hasAccess = await githubService.validateRepositoryAccess(
-        user.accessToken,
-        owner,
-        repo
-      );
-
-      if (!hasAccess) {
-        console.log(`Access lost to repository: ${repository.fullName}`);
-        await ctx.db.patch(args.repositoryId, {
-          isActive: false,
-          lastChecked: Date.now(),
-        });
-        return {
-          success: false,
-          error: "Access to repository has been revoked",
-          repositoryName: repository.fullName,
-        };
-      }
-
-      // Fetch issues from GitHub (incremental update if we have a last check time)
-      const since = repository.lastChecked > 0 ? new Date(repository.lastChecked) : undefined;
-      const issues = since 
-        ? await githubService.fetchRecentRepositoryIssues(user.accessToken, owner, repo, since)
-        : await githubService.fetchAllRepositoryIssues(user.accessToken, owner, repo);
-
-      console.log(`Fetched ${issues.length} issues from ${repository.fullName}`);
-
-      // Update or insert issues in database
-      let updatedIssueCount = 0;
-      let newIssueCount = 0;
-
-      for (const githubIssue of issues) {
-        // Check if issue already exists
-        const existingIssue = await ctx.db
-          .query("issues")
-          .withIndex("by_repository", (q: any) => q.eq("repositoryId", args.repositoryId))
-          .filter((q: any) => q.eq(q.field("githubIssueId"), githubIssue.number))
-          .first();
-
-        const issueData = {
-          repositoryId: args.repositoryId,
-          githubIssueId: githubIssue.number,
-          title: githubIssue.title,
-          url: githubIssue.html_url,
-          state: githubIssue.state as "open" | "closed",
-          labels: githubIssue.labels.map((label: any) => label.name),
-          assignee: githubIssue.assignee?.login,
-          lastActivity: new Date(githubIssue.updated_at).getTime(),
-          updatedAt: Date.now(),
-        };
-
-        if (existingIssue) {
-          // Update existing issue
-          await ctx.db.patch(existingIssue._id, issueData);
-          updatedIssueCount++;
-        } else {
-          // Insert new issue
-          await ctx.db.insert("issues", {
-            ...issueData,
-            isStale: false, // Will be evaluated below
-            createdAt: Date.now(),
-          });
-          newIssueCount++;
-        }
-      }
-
-      // Apply stale detection rules to all issues in the repository
-      const allIssues = await ctx.db
-        .query("issues")
-        .withIndex("by_repository", (q: any) => q.eq("repositoryId", args.repositoryId))
-        .collect();
-
-      let staleIssueCount = 0;
-      let staleStatusChanges = 0;
-
-      for (const issue of allIssues) {
-        const wasStale = issue.isStale;
-        const isNowStale = evaluateIssueAgainstMultipleRules(issue, rules);
-
-        if (wasStale !== isNowStale) {
-          await ctx.db.patch(issue._id, {
-            isStale: isNowStale,
-            updatedAt: Date.now(),
-          });
-          staleStatusChanges++;
-        }
-
-        if (isNowStale) {
-          staleIssueCount++;
-        }
-      }
-
-      // Update repository status
-      await ctx.db.patch(args.repositoryId, {
-        lastChecked: Date.now(),
-        lastIssueCount: allIssues.length,
-      });
-
-      const duration = Date.now() - startTime;
-      console.log(`Completed ${checkType} check for ${repository.fullName} in ${duration}ms`);
-
+    if (!repository.isActive) {
+      console.log(`Skipping inactive repository: ${repository.fullName}`);
       return {
         success: true,
+        skipped: true,
+        reason: "Repository is inactive",
         repositoryName: repository.fullName,
-        checkType,
-        statistics: {
-          totalIssues: allIssues.length,
-          newIssues: newIssueCount,
-          updatedIssues: updatedIssueCount,
-          staleIssues: staleIssueCount,
-          staleStatusChanges,
-          rulesApplied: rules.length,
-        },
-        duration,
-      };
-
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      console.error(`Error processing repository ${args.repositoryId}:`, error);
-
-      // Track the error
-      await trackRepositoryError(ctx, args.repositoryId, {
-        type: getErrorType(error),
-        message: error instanceof Error ? error.message : "Unknown error",
-        timestamp: Date.now(),
-        checkType,
-        details: error instanceof GitHubApiError ? {
-          status: error.status,
-          code: error.code,
-          rateLimitRemaining: error.rateLimitRemaining,
-          rateLimitReset: error.rateLimitReset,
-        } : undefined,
-      });
-
-      // Update last checked time even on error to prevent constant retries
-      const repository = await ctx.db.get(args.repositoryId);
-      if (repository) {
-        await ctx.db.patch(args.repositoryId, {
-          lastChecked: Date.now(),
-        });
-      }
-
-      return {
-        success: false,
-        repositoryName: repository?.fullName || "Unknown",
-        error: error instanceof Error ? error.message : "Unknown error",
-        errorType: getErrorType(error),
-        duration,
-        checkType,
       };
     }
+
+    const user = await ctx.db.get(repository.userId);
+    if (!user) {
+      throw new Error(`User ${repository.userId} not found for repository ${repository.fullName}`);
+    }
+
+    // Get active rules for this repository
+    const rules = await ctx.db
+      .query("rules")
+      .withIndex("by_repository", (q: any) => q.eq("repositoryId", args.repositoryId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    if (rules.length === 0) {
+      console.log(`No active rules found for repository: ${repository.fullName}`);
+      await ctx.db.patch(args.repositoryId, {
+        lastChecked: Date.now(),
+      });
+      return {
+        success: true,
+        skipped: true,
+        reason: "No active rules",
+        repositoryName: repository.fullName,
+      };
+    }
+
+    // Initialize GitHub service
+    const githubService = new GitHubService();
+    const [owner, repo] = repository.fullName.split("/");
+
+    // Validate repository access
+    const hasAccess = await githubService.validateRepositoryAccess(
+      user.accessToken,
+      owner,
+      repo
+    );
+
+    if (!hasAccess) {
+      console.log(`Access lost to repository: ${repository.fullName}`);
+      await ctx.db.patch(args.repositoryId, {
+        isActive: false,
+        lastChecked: Date.now(),
+      });
+      return {
+        success: false,
+        error: "Access to repository has been revoked",
+        repositoryName: repository.fullName,
+      };
+    }
+
+    // Fetch issues from GitHub (incremental update if we have a last check time)
+    const since = repository.lastChecked > 0 ? new Date(repository.lastChecked) : undefined;
+    const issues = since
+      ? await githubService.fetchRecentRepositoryIssues(user.accessToken, owner, repo, since)
+      : await githubService.fetchAllRepositoryIssues(user.accessToken, owner, repo);
+
+    console.log(`Fetched ${issues.length} issues from ${repository.fullName}`);
+
+    // Update or insert issues in database
+    let updatedIssueCount = 0;
+    let newIssueCount = 0;
+
+    for (const githubIssue of issues) {
+      // Check if issue already exists
+      const existingIssue = await ctx.db
+        .query("issues")
+        .withIndex("by_repository", (q: any) => q.eq("repositoryId", args.repositoryId))
+        .filter((q: any) => q.eq(q.field("githubIssueId"), githubIssue.number))
+        .first();
+
+      const issueData = {
+        repositoryId: args.repositoryId,
+        githubIssueId: githubIssue.number,
+        title: githubIssue.title,
+        url: githubIssue.html_url,
+        state: githubIssue.state as "open" | "closed",
+        labels: githubIssue.labels.map((label: any) => label.name),
+        assignee: githubIssue.assignee?.login,
+        lastActivity: new Date(githubIssue.updated_at).getTime(),
+        updatedAt: Date.now(),
+      };
+
+      if (existingIssue) {
+        // Update existing issue
+        await ctx.db.patch(existingIssue._id, issueData);
+        updatedIssueCount++;
+      } else {
+        // Insert new issue
+        await ctx.db.insert("issues", {
+          ...issueData,
+          isStale: false, // Will be evaluated below
+          createdAt: Date.now(),
+        });
+        newIssueCount++;
+      }
+    }
+
+    // Apply stale detection rules to all issues in the repository
+    const allIssues = await ctx.db
+      .query("issues")
+      .withIndex("by_repository", (q: any) => q.eq("repositoryId", args.repositoryId))
+      .collect();
+
+    let staleIssueCount = 0;
+    let staleStatusChanges = 0;
+    const newlyStaleIssues: any[] = [];
+
+    for (const issue of allIssues) {
+      const wasStale = issue.isStale;
+      const isNowStale = evaluateIssueAgainstMultipleRules(issue, rules);
+
+      if (wasStale !== isNowStale) {
+        await ctx.db.patch(issue._id, {
+          isStale: isNowStale,
+          updatedAt: Date.now(),
+        });
+        staleStatusChanges++;
+
+        // Track newly stale issues for notification
+        if (!wasStale && isNowStale) {
+          newlyStaleIssues.push(issue._id);
+        }
+      }
+
+      if (isNowStale) {
+        staleIssueCount++;
+      }
+    }
+
+    // Send notifications for newly stale issues
+    if (newlyStaleIssues.length > 0) {
+      console.log(`Found ${newlyStaleIssues.length} newly stale issues in ${repository.fullName}, sending notifications`);
+
+      try {
+        await ctx.scheduler.runAfter(0, internal.notifications.processStaleIssuesForNotification, {
+          repositoryId: args.repositoryId,
+          staleIssueIds: newlyStaleIssues,
+        });
+      } catch (notificationError) {
+        console.error(`Failed to schedule notifications for ${repository.fullName}:`, notificationError);
+        // Don't fail the entire processing if notifications fail
+      }
+    }
+
+    // Update repository status
+    await ctx.db.patch(args.repositoryId, {
+      lastChecked: Date.now(),
+      lastIssueCount: allIssues.length,
+    });
+
+    const duration = Date.now() - startTime;
+    console.log(`Completed ${checkType} check for ${repository.fullName} in ${duration}ms`);
+
+    return {
+      success: true,
+      repositoryName: repository.fullName,
+      checkType,
+      statistics: {
+        totalIssues: allIssues.length,
+        newIssues: newIssueCount,
+        updatedIssues: updatedIssueCount,
+        staleIssues: staleIssueCount,
+        staleStatusChanges,
+        rulesApplied: rules.length,
+      },
+      duration,
+    };
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`Error processing repository ${args.repositoryId}:`, error);
+
+    // Track the error
+    await trackRepositoryError(ctx, args.repositoryId, {
+      type: getErrorType(error),
+      message: error instanceof Error ? error.message : "Unknown error",
+      timestamp: Date.now(),
+      checkType,
+      details: error instanceof GitHubApiError ? {
+        status: error.status,
+        code: error.code,
+        rateLimitRemaining: error.rateLimitRemaining,
+        rateLimitReset: error.rateLimitReset,
+      } : undefined,
+    });
+
+    // Update last checked time even on error to prevent constant retries
+    const repository = await ctx.db.get(args.repositoryId);
+    if (repository) {
+      await ctx.db.patch(args.repositoryId, {
+        lastChecked: Date.now(),
+      });
+    }
+
+    return {
+      success: false,
+      repositoryName: repository?.fullName || "Unknown",
+      error: error instanceof Error ? error.message : "Unknown error",
+      errorType: getErrorType(error),
+      duration,
+      checkType,
+    };
+  }
 }
 
 /**
@@ -427,7 +448,7 @@ function evaluateIssueAgainstRule(issue: any, rule: any): boolean {
   // Check labels (if rule specifies labels, issue must have at least one matching label)
   if (rule.labels && rule.labels.length > 0) {
     const hasMatchingLabel = rule.labels.some((ruleLabel: string) =>
-      issue.labels.some((issueLabel: string) => 
+      issue.labels.some((issueLabel: string) =>
         issueLabel.toLowerCase() === ruleLabel.toLowerCase()
       )
     );
@@ -526,7 +547,7 @@ export const batchProcessRepositories = internalMutation({
       for (const promiseResult of batchResults) {
         if (promiseResult.status === "fulfilled") {
           const { repositoryId, success, result, error } = promiseResult.value;
-          
+
           if (success) {
             if (result?.skipped) {
               skippedCount++;
@@ -657,9 +678,9 @@ export const processRepositoriesWithProgress = internalMutation({
         errorCount++;
         const repository = await ctx.db.get(repositoryId);
         const repositoryName = repository?.fullName || "Unknown";
-        
+
         console.error(`Critical error processing ${repositoryName}:`, error);
-        
+
         results.push({
           repositoryId,
           repositoryName,
@@ -751,7 +772,7 @@ export const getProcessingStatus = internalQuery({
     }
 
     // Get repositories that need immediate attention
-    const needsAttention = repositoryStatuses.filter(repo => 
+    const needsAttention = repositoryStatuses.filter(repo =>
       repo.status === "critical" || repo.status === "never_checked"
     );
 
