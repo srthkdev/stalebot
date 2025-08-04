@@ -20,9 +20,14 @@ export interface NotificationPreferences {
   quietHours: {
     start: number; // hour 0-23
     end: number; // hour 0-23
+    timezone?: string; // IANA timezone identifier
   };
-  emailTemplate: string;
+  emailTemplate: "default" | "minimal" | "detailed";
   pauseNotifications: boolean;
+  pauseUntil?: number; // timestamp for temporary pause
+  unsubscribeToken?: string; // for unsubscribe links
+  bounceCount?: number; // track email bounces
+  lastBounceAt?: number; // timestamp of last bounce
 }
 
 export interface Repository {

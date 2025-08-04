@@ -111,7 +111,7 @@ export const updateNotificationPreferences = mutation({
       start: v.number(),
       end: v.number(),
     })),
-    emailTemplate: v.optional(v.string()),
+    emailTemplate: v.optional(v.union(v.literal("default"), v.literal("minimal"), v.literal("detailed"))),
     pauseNotifications: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {

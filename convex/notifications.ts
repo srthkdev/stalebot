@@ -3,7 +3,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
-// Email event handler for delivery status tracking (placeholder)
+// Email event handler for delivery status tracking with enhanced bounce management
 export const handleEmailEvent = internalMutation({
   args: {
     id: v.string(),
@@ -37,6 +37,11 @@ export const handleEmailEvent = internalMutation({
         break;
       case "email.bounced":
         status = "bounced";
+        // Handle bounce by updating user preferences
+        await ctx.runMutation(internal.notificationPreferences.handleEmailBounce, {
+          userId: notification.userId,
+          bounceType: args.event.data?.bounce_type === "hard" ? "hard" : "soft",
+        });
         break;
       case "email.delivery_delayed":
         // Keep current status, just log the delay
@@ -52,7 +57,16 @@ export const handleEmailEvent = internalMutation({
               pauseNotifications: true,
             },
           });
+          console.log(`Paused notifications for user ${notification.userId} due to spam complaint`);
         }
+        return;
+      case "email.clicked":
+        // Track email engagement (optional)
+        console.log(`Email clicked: ${args.id}`);
+        return;
+      case "email.opened":
+        // Track email opens (optional)
+        console.log(`Email opened: ${args.id}`);
         return;
       default:
         status = "failed";
@@ -65,6 +79,109 @@ export const handleEmailEvent = internalMutation({
     });
 
     console.log(`Updated notification ${notification._id} status to ${status}`);
+  },
+});
+
+// Manual function to update notification delivery status
+export const updateNotificationDeliveryStatus = internalMutation({
+  args: {
+    notificationId: v.id("notifications"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("bounced"),
+      v.literal("failed")
+    ),
+    deliveredAt: v.optional(v.number()),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const updateData: any = {
+      status: args.status,
+    };
+
+    if (args.deliveredAt) {
+      updateData.deliveredAt = args.deliveredAt;
+    }
+
+    await ctx.db.patch(args.notificationId, updateData);
+
+    // Log error if provided
+    if (args.errorMessage) {
+      console.error(`Notification ${args.notificationId} failed: ${args.errorMessage}`);
+    }
+
+    return { success: true };
+  },
+});
+
+// Search notifications by content or repository
+export const searchNotifications = query({
+  args: {
+    userId: v.id("users"),
+    searchTerm: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit || 20;
+    const searchTerm = args.searchTerm.toLowerCase();
+    
+    // Get all notifications for the user
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .take(200); // Limit search scope for performance
+
+    // Filter and enrich notifications
+    const matchingNotifications = [];
+    
+    for (const notification of notifications) {
+      const repository = await ctx.db.get(notification.repositoryId);
+      if (!repository) continue;
+
+      // Check if search term matches repository name
+      const repositoryMatch = repository.name.toLowerCase().includes(searchTerm) ||
+                             repository.fullName.toLowerCase().includes(searchTerm);
+
+      // Check if search term matches any issue titles
+      let issueMatch = false;
+      const issues = await Promise.all(
+        notification.issueIds.map((issueId) => ctx.db.get(issueId))
+      );
+      
+      const validIssues = issues.filter(Boolean);
+      for (const issue of validIssues) {
+        if (issue!.title.toLowerCase().includes(searchTerm)) {
+          issueMatch = true;
+          break;
+        }
+      }
+
+      if (repositoryMatch || issueMatch) {
+        matchingNotifications.push({
+          ...notification,
+          repository: {
+            name: repository.name,
+            fullName: repository.fullName,
+          },
+          issues: validIssues.map((issue) => ({
+            title: issue!.title,
+            url: issue!.url,
+            labels: issue!.labels,
+            lastActivity: issue!.lastActivity,
+          })),
+          issueCount: notification.issueIds.length,
+        });
+
+        if (matchingNotifications.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    return matchingNotifications;
   },
 });
 
@@ -215,7 +332,8 @@ export const generateStaleIssueEmailHtml = (
   }>,
   userPreferences: {
     emailTemplate: string;
-  }
+  },
+  unsubscribeToken?: string
 ): string => {
   // Input validation
   if (!repositoryName || !staleIssues || staleIssues.length === 0) {
@@ -349,15 +467,20 @@ export const generateStaleIssueEmailHtml = (
   <div style="border-top: 1px solid #d1d9e0; padding-top: 24px; text-align: center; color: #656d76; font-size: 14px;">
     <p style="margin: 0 0 8px 0;">This email was sent by StaleBot to help you manage stale issues in your repositories.</p>
     <p style="margin: 0;">
-      <a href="{{unsubscribe_url}}" style="color: #0969da; text-decoration: none;">Manage notification preferences</a> |
-      <a href="{{dashboard_url}}" style="color: #0969da; text-decoration: none;">View dashboard</a>
+      <a href="${process.env.SITE_URL || 'https://stalebot.dev'}/unsubscribe?token={{unsubscribe_token}}" style="color: #0969da; text-decoration: none;">Unsubscribe</a> |
+      <a href="${process.env.SITE_URL || 'https://stalebot.dev'}/dashboard" style="color: #0969da; text-decoration: none;">View dashboard</a>
     </p>
   </div>
 </body>
 </html>
   `;
 
-  return baseTemplate;
+  // Replace unsubscribe token placeholder
+  const finalTemplate = unsubscribeToken 
+    ? baseTemplate.replace('{{unsubscribe_token}}', unsubscribeToken)
+    : baseTemplate.replace('{{unsubscribe_token}}', '');
+
+  return finalTemplate;
 };
 
 // Generate plain text version of the email
@@ -447,18 +570,47 @@ export const generateStaleIssueEmailText = (
   return text;
 };
 
-// Query to get notification history for a user
+// Query to get notification history for a user with filtering and search
 export const getNotificationHistory = query({
   args: {
     userId: v.id("users"),
     limit: v.optional(v.number()),
+    status: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("bounced"),
+      v.literal("failed")
+    )),
+    repositoryId: v.optional(v.id("repositories")),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const limit = args.limit || 50;
     
-    const notifications = await ctx.db
+    let query = ctx.db
       .query("notifications")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .withIndex("by_user", (q) => q.eq("userId", args.userId));
+
+    // Apply filters
+    if (args.status) {
+      query = query.filter((q) => q.eq(q.field("status"), args.status));
+    }
+    
+    if (args.repositoryId) {
+      query = query.filter((q) => q.eq(q.field("repositoryId"), args.repositoryId));
+    }
+    
+    if (args.startDate) {
+      query = query.filter((q) => q.gte(q.field("sentAt"), args.startDate!));
+    }
+    
+    if (args.endDate) {
+      query = query.filter((q) => q.lte(q.field("sentAt"), args.endDate!));
+    }
+
+    const notifications = await query
       .order("desc")
       .take(limit);
 
@@ -480,12 +632,115 @@ export const getNotificationHistory = query({
             title: issue!.title,
             url: issue!.url,
             labels: issue!.labels,
+            lastActivity: issue!.lastActivity,
           })),
+          issueCount: notification.issueIds.length,
         };
       })
     );
 
     return enrichedNotifications;
+  },
+});
+
+// Get notification statistics for dashboard
+export const getNotificationStats = query({
+  args: {
+    userId: v.id("users"),
+    days: v.optional(v.number()), // Number of days to look back, default 30
+  },
+  handler: async (ctx, args) => {
+    const days = args.days || 30;
+    const startDate = Date.now() - (days * 24 * 60 * 60 * 1000);
+    
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .filter((q) => q.gte(q.field("sentAt"), startDate))
+      .collect();
+
+    const stats = {
+      total: notifications.length,
+      sent: notifications.filter(n => n.status === "sent").length,
+      delivered: notifications.filter(n => n.status === "delivered").length,
+      bounced: notifications.filter(n => n.status === "bounced").length,
+      failed: notifications.filter(n => n.status === "failed").length,
+      pending: notifications.filter(n => n.status === "pending").length,
+      totalIssues: notifications.reduce((sum, n) => sum + n.issueIds.length, 0),
+      deliveryRate: 0,
+      bounceRate: 0,
+    };
+
+    // Calculate rates
+    const totalSent = stats.sent + stats.delivered + stats.bounced + stats.failed;
+    if (totalSent > 0) {
+      stats.deliveryRate = Math.round((stats.delivered / totalSent) * 100);
+      stats.bounceRate = Math.round((stats.bounced / totalSent) * 100);
+    }
+
+    return stats;
+  },
+});
+
+// Get notification history grouped by repository
+export const getNotificationHistoryByRepository = query({
+  args: {
+    userId: v.id("users"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit || 10;
+    
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .take(limit * 5); // Get more to group properly
+
+    // Group by repository
+    const repositoryGroups = new Map<string, typeof notifications>();
+    
+    for (const notification of notifications) {
+      const repoId = notification.repositoryId;
+      if (!repositoryGroups.has(repoId)) {
+        repositoryGroups.set(repoId, []);
+      }
+      repositoryGroups.get(repoId)!.push(notification);
+    }
+
+    // Get repository details and create summary
+    const repositorySummaries = await Promise.all(
+      Array.from(repositoryGroups.entries()).slice(0, limit).map(async ([repoId, repoNotifications]) => {
+        const repository = await ctx.db.get(repoId as Id<"repositories">);
+        if (!repository) return null;
+
+        const totalNotifications = repoNotifications.length;
+        const totalIssues = repoNotifications.reduce((sum, n) => sum + n.issueIds.length, 0);
+        const lastNotification = repoNotifications[0];
+        
+        const statusCounts = {
+          delivered: repoNotifications.filter(n => n.status === "delivered").length,
+          bounced: repoNotifications.filter(n => n.status === "bounced").length,
+          failed: repoNotifications.filter(n => n.status === "failed").length,
+          pending: repoNotifications.filter(n => n.status === "pending").length,
+        };
+
+        return {
+          repository: {
+            id: repository._id,
+            name: repository.name,
+            fullName: repository.fullName,
+          },
+          totalNotifications,
+          totalIssues,
+          lastNotificationAt: lastNotification.sentAt,
+          statusCounts,
+          recentNotifications: repoNotifications.slice(0, 3), // Most recent 3
+        };
+      })
+    );
+
+    return repositorySummaries.filter(Boolean);
   },
 });
 
@@ -518,9 +773,13 @@ async function sendStaleIssueNotificationImpl(
       throw new Error("User or repository not found");
     }
 
-    // Check if notifications are paused
-    if (user.notificationPreferences.pauseNotifications) {
-      console.log(`Notifications paused for user ${args.userId}`);
+    // Check if notifications should be sent based on preferences
+    const shouldSendResult = await ctx.runMutation(internal.notificationPreferences.shouldSendNotification, {
+      userId: args.userId,
+    });
+    
+    if (!shouldSendResult.shouldSend) {
+      console.log(`Notifications not sent for user ${args.userId}: ${shouldSendResult.reason}`);
       return null;
     }
 
@@ -554,11 +813,20 @@ async function sendStaleIssueNotificationImpl(
       return null;
     }
 
+    // Generate unsubscribe token if not exists
+    let unsubscribeToken = user.notificationPreferences.unsubscribeToken;
+    if (!unsubscribeToken) {
+      unsubscribeToken = await ctx.runMutation(internal.notificationPreferences.generateUnsubscribeToken, {
+        userId: args.userId,
+      });
+    }
+
     // Generate email content
     const emailHtml = generateStaleIssueEmailHtml(
       repository.fullName,
       validStaleIssues,
-      user.notificationPreferences
+      user.notificationPreferences,
+      unsubscribeToken
     );
     
     const emailText = generateStaleIssueEmailText(
@@ -1272,6 +1540,169 @@ export const checkDuplicateNotifications = internalQuery({
       hasDuplicates: duplicateIssues.length > 0,
       duplicateIssues,
       recentNotificationCount: recentNotifications.length,
+    };
+  },
+});
+// Public endpoint for handling unsubscribe requests from email links
+export const handleUnsubscribeRequest = mutation({
+  args: {
+    token: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ success: boolean; message: string; userEmail?: string }> => {
+    try {
+      const result = await ctx.runMutation(internal.notificationPreferences.handleUnsubscribe, {
+        token: args.token,
+      });
+      
+      return result;
+    } catch (error) {
+      console.error("Unsubscribe error:", error);
+      return {
+        success: false,
+        message: "Invalid or expired unsubscribe link",
+      };
+    }
+  },
+});
+
+// Get notification delivery metrics for admin/monitoring
+export const getDeliveryMetrics = query({
+  args: {
+    userId: v.id("users"),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const startDate = args.startDate || (Date.now() - (30 * 24 * 60 * 60 * 1000)); // Default 30 days
+    const endDate = args.endDate || Date.now();
+    
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .filter((q) => q.gte(q.field("sentAt"), startDate))
+      .filter((q) => q.lte(q.field("sentAt"), endDate))
+      .collect();
+
+    // Calculate daily metrics
+    const dailyMetrics = new Map<string, {
+      date: string;
+      sent: number;
+      delivered: number;
+      bounced: number;
+      failed: number;
+      issues: number;
+    }>();
+
+    for (const notification of notifications) {
+      const date = new Date(notification.sentAt).toISOString().split('T')[0];
+      
+      if (!dailyMetrics.has(date)) {
+        dailyMetrics.set(date, {
+          date,
+          sent: 0,
+          delivered: 0,
+          bounced: 0,
+          failed: 0,
+          issues: 0,
+        });
+      }
+
+      const dayMetrics = dailyMetrics.get(date)!;
+      dayMetrics.issues += notification.issueIds.length;
+
+      switch (notification.status) {
+        case "sent":
+        case "delivered":
+          dayMetrics.sent++;
+          if (notification.status === "delivered") {
+            dayMetrics.delivered++;
+          }
+          break;
+        case "bounced":
+          dayMetrics.bounced++;
+          break;
+        case "failed":
+          dayMetrics.failed++;
+          break;
+      }
+    }
+
+    // Convert to array and sort by date
+    const metricsArray = Array.from(dailyMetrics.values()).sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    // Calculate overall metrics
+    const totalNotifications = notifications.length;
+    const totalIssues = notifications.reduce((sum, n) => sum + n.issueIds.length, 0);
+    const deliveredCount = notifications.filter(n => n.status === "delivered").length;
+    const bouncedCount = notifications.filter(n => n.status === "bounced").length;
+    const failedCount = notifications.filter(n => n.status === "failed").length;
+
+    return {
+      dailyMetrics: metricsArray,
+      summary: {
+        totalNotifications,
+        totalIssues,
+        deliveryRate: totalNotifications > 0 ? Math.round((deliveredCount / totalNotifications) * 100) : 0,
+        bounceRate: totalNotifications > 0 ? Math.round((bouncedCount / totalNotifications) * 100) : 0,
+        failureRate: totalNotifications > 0 ? Math.round((failedCount / totalNotifications) * 100) : 0,
+        avgIssuesPerNotification: totalNotifications > 0 ? Math.round(totalIssues / totalNotifications) : 0,
+      },
+    };
+  },
+});
+
+// Function to clean up old notification records (for maintenance)
+export const cleanupOldNotifications = internalMutation({
+  args: {
+    olderThanDays: v.number(),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const batchSize = args.batchSize || 100;
+    const cutoffDate = Date.now() - (args.olderThanDays * 24 * 60 * 60 * 1000);
+    
+    const oldNotifications = await ctx.db
+      .query("notifications")
+      .filter((q) => q.lt(q.field("sentAt"), cutoffDate))
+      .take(batchSize);
+
+    let deletedCount = 0;
+    for (const notification of oldNotifications) {
+      await ctx.db.delete(notification._id);
+      deletedCount++;
+    }
+
+    console.log(`Cleaned up ${deletedCount} old notification records`);
+    
+    return {
+      deletedCount,
+      hasMore: oldNotifications.length === batchSize,
+    };
+  },
+});
+
+// Get notification templates for email customization
+export const getNotificationTemplates = query({
+  args: {},
+  handler: async () => {
+    return {
+      default: {
+        name: "Default",
+        description: "Rich HTML template with full styling and issue details",
+        features: ["Colorful styling", "Issue labels", "Activity dates", "Repository branding"],
+      },
+      minimal: {
+        name: "Minimal",
+        description: "Clean, simple template with essential information",
+        features: ["Simple layout", "Issue titles and links", "Minimal styling", "Fast loading"],
+      },
+      detailed: {
+        name: "Detailed",
+        description: "Comprehensive template with additional context",
+        features: ["Issue descriptions", "Activity history", "Repository stats", "Contributor info"],
+      },
     };
   },
 });

@@ -19,9 +19,14 @@ export default defineSchema({
       quietHours: v.object({
         start: v.number(), // hour 0-23
         end: v.number(), // hour 0-23
+        timezone: v.optional(v.string()), // IANA timezone identifier
       }),
-      emailTemplate: v.string(),
+      emailTemplate: v.union(v.literal("default"), v.literal("minimal"), v.literal("detailed")),
       pauseNotifications: v.boolean(),
+      pauseUntil: v.optional(v.number()), // timestamp for temporary pause
+      unsubscribeToken: v.optional(v.string()), // for unsubscribe links
+      bounceCount: v.optional(v.number()), // track email bounces
+      lastBounceAt: v.optional(v.number()), // timestamp of last bounce
     }),
     createdAt: v.number(),
     lastActive: v.number(),
