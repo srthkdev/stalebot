@@ -156,7 +156,7 @@ export interface AddRepositoryFormData {
 // API response types
 export interface DashboardData {
   user: UserProfile;
-  repositories: Repository[];
+  repositories: RepositoryWithStats[];
   recentNotifications: NotificationRecord[];
   totalStaleIssues: number;
   activeRules: number;
@@ -166,6 +166,134 @@ export interface RepositoryWithStats extends Repository {
   staleIssueCount: number;
   totalIssueCount: number;
   lastNotificationSent?: number;
+}
+
+export interface RepositoryStats {
+  repository: Repository;
+  statistics: {
+    totalIssues: number;
+    staleIssues: number;
+    openIssues: number;
+    closedIssues: number;
+    averageStaleDays: number;
+    notificationSuccessRate: number;
+    activeRulesCount: number;
+    lastChecked: number;
+    daysSinceLastCheck: number;
+  };
+  recentNotifications: NotificationRecord[];
+  activeRules: StaleRule[];
+}
+
+export interface SystemHealth {
+  overview: {
+    totalUsers: number;
+    totalRepositories: number;
+    activeRepositories: number;
+    totalStaleIssues: number;
+  };
+  performance: {
+    notificationsLast24h: number;
+    deliveryRate: number;
+    failedNotifications: number;
+    repositoriesCheckedLast24h: number;
+    averageProcessingDelayHours: number;
+  };
+  health: {
+    staleRepositories: number;
+    bouncedUsers: number;
+    systemStatus: "healthy" | "degraded" | "critical";
+  };
+  lastUpdated: number;
+}
+
+export interface DashboardSummary {
+  totalRepositories: number;
+  activeRepositories: number;
+  totalStaleIssues: number;
+  activeRules: number;
+  notificationsThisWeek: number;
+  repositoriesNeedingAttention: number;
+  lastUpdated: number;
+}
+
+export interface DashboardManagementData {
+  repositories: RepositoryWithManagementInfo[];
+  rules: RuleWithRepositoryInfo[];
+  summary: {
+    totalRepositories: number;
+    activeRepositories: number;
+    totalRules: number;
+    activeRules: number;
+    repositoriesWithIssues: number;
+    repositoriesWithStaleIssues: number;
+  };
+}
+
+export interface RepositoryWithManagementInfo extends Repository {
+  rulesCount: number;
+  activeRulesCount: number;
+  totalIssues: number;
+  staleIssues: number;
+  lastNotificationSent?: number;
+  healthScore: number;
+}
+
+export interface RuleWithRepositoryInfo extends StaleRule {
+  repositoryName: string;
+  repositoryFullName: string;
+  repositoryIsActive: boolean;
+}
+
+export interface BulkOperationResult {
+  operation: string;
+  results: Array<{
+    repositoryId?: Id<"repositories">;
+    ruleId?: Id<"rules">;
+    repositoryName?: string;
+    ruleName?: string;
+    success: boolean;
+    error?: string;
+    message?: string;
+  }>;
+  successCount: number;
+  failureCount: number;
+}
+
+export interface DashboardSystemStatus {
+  repositories: {
+    total: number;
+    active: number;
+    stale: number;
+    recentlyChecked: number;
+    healthPercentage: number;
+  };
+  notifications: {
+    last24h: number;
+    failed: number;
+    successRate: number;
+  };
+  overall: {
+    healthScore: number;
+    status: "healthy" | "warning" | "critical";
+    lastUpdated: number;
+  };
+}
+
+export interface DashboardQuickActions {
+  availableActions: Array<{
+    id: string;
+    title: string;
+    description: string;
+    count: number;
+    enabled: boolean;
+    repositoryIds?: Id<"repositories">[];
+    ruleIds?: Id<"rules">[];
+  }>;
+  summary: {
+    totalActionableItems: number;
+    lastUpdated: number;
+  };
 }
 
 export interface NotificationWithDetails extends NotificationRecord {
