@@ -39,12 +39,13 @@ export class GitHubService {
   private readonly baseDelay = 1000; // 1 second
 
   /**
-   * Make an authenticated request to the GitHub API with retry logic
+   * Make an authenticated request to the GitHub API with retry logic and automatic token refresh
    */
   private async makeRequest<T>(
     endpoint: string,
     accessToken: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    tokenRefreshCallback?: (newToken: string) => Promise<void>
   ): Promise<T> {
     return this.withRetry(async () => {
       const url = `${this.baseUrl}${endpoint}`;
@@ -71,11 +72,52 @@ export class GitHubService {
             rateLimitRemaining
           );
         }
+        
+        // Check for secondary rate limits or abuse detection
+        const retryAfter = response.headers.get("retry-after");
+        if (retryAfter) {
+          const retryAfterMs = parseInt(retryAfter) * 1000;
+          throw new RateLimitError(
+            "GitHub API secondary rate limit exceeded",
+            Date.now() + retryAfterMs,
+            0
+          );
+        }
       }
 
       // Handle authentication errors
       if (response.status === 401) {
-        throw new AuthenticationError("GitHub token is invalid or expired");
+        const errorBody = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorBody);
+        } catch {
+          errorData = { message: errorBody };
+        }
+
+        throw new AuthenticationError(
+          errorData.message || "GitHub token is invalid or expired"
+        );
+      }
+
+      // Handle repository access errors
+      if (response.status === 404) {
+        const errorBody = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorBody);
+        } catch {
+          errorData = { message: errorBody };
+        }
+
+        throw new GitHubApiError(
+          response.status,
+          "not_found",
+          errorData.message || "Repository not found or access denied",
+          parseInt(response.headers.get("x-ratelimit-remaining") || "0"),
+          parseInt(response.headers.get("x-ratelimit-reset") || "0"),
+          errorData
+        );
       }
 
       // Handle other HTTP errors
@@ -159,6 +201,52 @@ export class GitHubService {
   }
 
   /**
+   * Make a request with automatic token refresh on authentication failure
+   */
+  async makeRequestWithTokenRefresh<T>(
+    endpoint: string,
+    accessToken: string,
+    refreshToken: string,
+    clientId: string,
+    clientSecret: string,
+    options: RequestInit = {}
+  ): Promise<{
+    data: T;
+    newAccessToken?: string;
+  }> {
+    try {
+      const data = await this.makeRequest<T>(endpoint, accessToken, options);
+      return { data };
+    } catch (error) {
+      // If authentication failed, try to refresh the token
+      if (error instanceof AuthenticationError) {
+        console.log("Access token expired, attempting refresh...");
+        
+        try {
+          const tokenResponse = await this.refreshAccessToken(
+            refreshToken,
+            clientId,
+            clientSecret
+          );
+          
+          // Retry the original request with the new token
+          const data = await this.makeRequest<T>(endpoint, tokenResponse.access_token, options);
+          
+          return {
+            data,
+            newAccessToken: tokenResponse.access_token,
+          };
+        } catch (refreshError) {
+          console.error("Token refresh failed:", refreshError);
+          throw new AuthenticationError("Token refresh failed - user needs to re-authenticate");
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
    * Validate if the access token is still valid
    */
   async validateToken(accessToken: string): Promise<boolean> {
@@ -177,37 +265,54 @@ export class GitHubService {
   /**
    * Refresh an expired access token using the refresh token
    */
-  async refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-    // Note: This would typically require client credentials and a separate endpoint
-    // For GitHub Apps, this would be different. This is a placeholder implementation.
-    const response = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        // client_id and client_secret would be needed here
-      }),
+  async refreshAccessToken(
+    refreshToken: string,
+    clientId?: string,
+    clientSecret?: string
+  ): Promise<TokenResponse> {
+    if (!clientId || !clientSecret) {
+      throw new AuthenticationError("Client credentials required for token refresh");
+    }
+
+    return this.withRetry(async () => {
+      const response = await fetch("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "StaleBot/1.0",
+        },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: "refresh_token",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new AuthenticationError(`Token refresh failed: HTTP ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new AuthenticationError(`Token refresh failed: ${data.error_description || data.error}`);
+      }
+
+      if (!data.access_token) {
+        throw new AuthenticationError("No access token received from refresh");
+      }
+
+      return {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || refreshToken, // GitHub may not return a new refresh token
+        expires_in: data.expires_in || 3600,
+        token_type: data.token_type || "bearer",
+        scope: data.scope || "",
+      };
     });
-
-    if (!response.ok) {
-      throw new AuthenticationError("Failed to refresh access token");
-    }
-
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new AuthenticationError(`Token refresh failed: ${data.error_description || data.error}`);
-    }
-
-    return {
-      access_token: data.access_token,
-      refresh_token: data.refresh_token || refreshToken, // GitHub may not return a new refresh token
-      expires_in: data.expires_in || 3600,
-    };
   }
 
   /**
